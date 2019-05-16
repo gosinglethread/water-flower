@@ -1,14 +1,31 @@
-# encoding:utf8
 from machine import ADC
 from machine import Pin
 from machine import Timer
+import utime
 
-pump_control_pin = Pin(11, Pin.OUT)
+pump_control_pin = Pin(32, Pin.OUT)
 water_sensor_pin = Pin(10)
+
+
+def get_water_num():
+    return water_sensor_pin.value()
+
+def check_water_low(cfg, water_num):
+    return cfg.get_water_low_num() > water_num
+
+def handle_water_low(pumperMgr):
+    print('water low')
+    pumperMgr.enable_pumper()
+
+def check_water():
+    water_num = get_water_num()
+    is_water_low = check_water_low(cfg, water_num)
+    if is_water_low:
+        handle_water_low(pumperMgr)
 
 class Conf(object):
     def __init__(self, remote_addr=''):
-        self.__check_water_interval = 1
+        self.__check_water_interval = 1000
         self.__water_low_num = 100
     
     def get_water_low_num(self):
@@ -25,7 +42,7 @@ class Conf(object):
 		
 
 class Pumper(object):
-    def __init__(self, pin_num, on_timer_id=57):
+    def __init__(self, pin_num = 2, on_timer_id=57):
         self.__pin = Pin(pin_num, Pin.OUT)
         self.__time_to_on = 0
         self.__on_timer_id = on_timer_id
@@ -57,35 +74,44 @@ class Pumper(object):
         self.__on_timer = Timer(self.__on_timer_id).init(period=self.__time_to_on, mode=Timer.ONE_SHOT, callback=self.off)
 
 
+class PumperMgr(object):
+    def __init__(self, pumper, on_once=1000, protect_once=10000):
+        self.__pumper = pumper
+        self.__pumper_protect_time = 0
+        self.__pumper_on_time_once = on_once
+        self.__pumper_protect_time_once = protect_once
+    
+    def enable_pumper(self):
+        now = utime.time()
+        if now < self.__pumper_protect_time:
+            print('PumperMgr: in protect time, pass.', now, self.__pumper_protect_time)
+            return
+        self.__pumper.on_for_milliseconds(self.__pumper_on_time_once)
+        self.__pumper_protect_time = now + self.__pumper_protect_time_once / 1000
+        print('PumperMgr: now protect time is %d' % (self.__pumper_protect_time))
 
-def get_water_num():
-    return water_sensor_pin.read()
-
-def check_water_low(cfg, water_num):
-    return cfg.get_water_low_num() > water_num
-
-def handle_water_low():
-    print('water low')
-    power_pump()
-
-def power_pump():
-    pump_control_pin.on()
-
-def power_pump_for_milliseconds(milliseconds=1000):
-    power_pump()
 
 
-def dis_power_pump():
-    pump_control_pin.off()
 
-def check_water():
-    cfg = Conf()
-    water_num = get_water_num()
-    is_water_low = check_water_low(cfg, water_num)
-    if is_water_low:
-        handle_water_low()
+cfg = None
+pumperMgr = None
+
 
 def main():
+    global cfg 
     cfg = Conf()
-    Timer(1).init(period=cfg.get_check_water_interval, mode=Timer.PERIOD, callback=check_water)
+    global pumperMgr 
+    pumper = Pumper()
+    pumperMgr = PumperMgr(pumper)
+    #Timer(1).init(period=cfg.get_check_water_interval(), mode=Timer.PERIODIC, callback=check_water)
+    while True:
+      check_water()
+      utime.sleep(5)
+
+try:
+    main()
+except Exception as e:
+    import sys
+    sys.print_exception(e)
+
 
